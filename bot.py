@@ -11,6 +11,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from aiohttp import web
+
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ADMINS = -1004396371396
 ADMIN_IDS = [7912018121, 807512049, 1709727241, 922576013, 5966724057, 755639362, 895799049]
@@ -78,8 +80,8 @@ def e(key, fallback="✨"):
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Зарегистрироваться", callback_data="register", icon_custom_emoji_id=PREMIUM_EMOJIS["register_icon"])],
-        [InlineKeyboardButton(text="Сообщить о пропуске актива/кубков", callback_data="report_active", icon_custom_emoji_id=PREMIUM_EMOJIS["report_icon"])],
-        [InlineKeyboardButton(text="Сообщить о замене на челлендж", callback_data="report_challenge", icon_custom_emoji_id=PREMIUM_EMOJIS["report_icon"])],
+        [InlineKeyboardButton(text="Сообщить о пропуске актива / кубков", callback_data="report_active", icon_custom_emoji_id=PREMIUM_EMOJIS["report_icon"])],
+        [InlineKeyboardButton(text="Сообщить о замене / опоздании на челлендж", callback_data="report_challenge", icon_custom_emoji_id=PREMIUM_EMOJIS["report_icon"])],
         [InlineKeyboardButton(text="Предложить идею", callback_data="idea", icon_custom_emoji_id=PREMIUM_EMOJIS["idea_icon"])],
         [InlineKeyboardButton(text="Связаться с админами", callback_data="support", icon_custom_emoji_id=PREMIUM_EMOJIS["support_icon"])],
         [InlineKeyboardButton(text="Уведомления", callback_data="notifications", icon_custom_emoji_id=PREMIUM_EMOJIS["notifications_icon"])],
@@ -108,7 +110,7 @@ def report_active_text():
 
 def report_challenge_text():
     return (
-        f"{e('report_header')} <b>Сообщить о замене на челлендж</b>\n\n"
+        f"{e('report_header')} <b>Сообщить о замене / опоздании на челлендж</b>\n\n"
         f"Напиши одним сообщением:\n"
         f"{e('num_1')} Игровой ник\n"
         f"{e('num_2')} Не сможешь выполнить челлендж\n"
@@ -138,10 +140,8 @@ def help_text():
         f"{e('heart')} <b>Команды бота</b> {e('dove')}\n\n"
         f"{e('sparkles')} /start — главное меню\n"
         f"{e('register_icon')} /register — регистрация\n"
-        f"{e('report_icon')} /report — пропуск актива или кубков\n"
-        f"{e('report_icon')} /report_active — пропуск актива или кубков\n"
-        f"{e('report_icon')} /challenge — замена на челлендж\n"
-        f"{e('report_icon')} /report_challenge — замена на челлендж\n"
+        f"{e('report_icon')} /report_active — пропуск актива / кубков\n"
+        f"{e('report_icon')} /report_challenge — замена / опоздание на челлендж\n"
         f"{e('idea_icon')} /idea — предложить идею\n"
         f"{e('support_icon')} /support — связаться с админами\n"
         f"{e('notifications_icon')} /notifications — уведомления\n"
@@ -205,7 +205,6 @@ async def report_active_button(callback: CallbackQuery):
     await send_report(callback.message.chat.id, report_active_text())
     await callback.answer()
 
-@dp.message(Command("report"))
 @dp.message(Command("report_active"))
 async def report_active_command(message: Message):
     await send_report(message.chat.id, report_active_text())
@@ -216,7 +215,6 @@ async def report_challenge_button(callback: CallbackQuery):
     await send_report(callback.message.chat.id, report_challenge_text())
     await callback.answer()
 
-@dp.message(Command("challenge"))
 @dp.message(Command("report_challenge"))
 async def report_challenge_command(message: Message):
     await send_report(message.chat.id, report_challenge_text())
@@ -342,9 +340,24 @@ async def all_messages(message: Message):
         except Exception:
             await message.reply(f"{e('cross_icon')} Не удалось отправить ответ.", parse_mode="HTML")
 
+async def health_check(request):
+    return web.Response(text="🕊 Бот Freed Angels работает!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
+    print("Веб-сервер запущен на порту 10000")
+
 async def main():
     print("🕊 Бот клуба Freed Angels успешно запущен!")
-    await dp.start_polling(bot)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        start_web_server()
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
