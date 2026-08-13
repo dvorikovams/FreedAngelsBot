@@ -180,23 +180,27 @@ async def start(message: Message, state: FSMContext):
         text = f"{e('greet_icon')} Добро пожаловать в {e('angel_left')} <b>Freed Angels</b> {e('angel_right')}! {e('star')}\n\nЯ — твой личный помощник {e('ribbon')}\nВыбери действие"
         await send_menu(message.chat.id, text, is_registered=False)
 
-async def start_registration(user, chat_id, state: FSMContext):
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user.id,))
-    if cursor.fetchone():
-        await send_menu(chat_id, f"{e('registered_already')} Регистрация уже пройдена! {e('sparkles')}", is_registered=True)
-        return
-    await state.update_data(user_id=user.id, username=user.username or "без ника", full_name=user.full_name)
-    await bot.send_message(chat_id, f"{e('sparkles')} Напиши свой игровой ник из Аватарии\n\nПример: <i>Игрок</i>", parse_mode="HTML")
-    await state.set_state(Registration.waiting_for_nick)
-
 @dp.message(Command("register"))
 async def register_command(message: Message, state: FSMContext):
-    await start_registration(message.from_user, message.chat.id, state)
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (message.from_user.id,))
+    if cursor.fetchone():
+        await send_menu(message.chat.id, f"{e('registered_already')} Регистрация уже пройдена! {e('sparkles')}", is_registered=True)
+        return
+    await state.update_data(user_id=message.from_user.id, username=message.from_user.username or "без ника", full_name=message.from_user.full_name)
+    await message.answer(f"{e('sparkles')} Напиши свой игровой ник из Аватарии\n\nПример: <i>Игрок</i>", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_nick)
 
 @dp.callback_query(F.data == "register")
 async def register_button(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
-    await start_registration(callback.from_user, callback.message.chat.id, state)
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (callback.from_user.id,))
+    if cursor.fetchone():
+        await send_menu(callback.message.chat.id, f"{e('registered_already')} Регистрация уже пройдена! {e('sparkles')}", is_registered=True)
+        await callback.answer()
+        return
+    await state.update_data(user_id=callback.from_user.id, username=callback.from_user.username or "без ника", full_name=callback.from_user.full_name)
+    await callback.message.answer(f"{e('sparkles')} Напиши свой игровой ник из Аватарии\n\nПример: <i>Игрок</i>", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_nick)
     await callback.answer()
 
 @dp.message(StateFilter(Registration.waiting_for_nick))
@@ -206,10 +210,15 @@ async def process_nick(message: Message, state: FSMContext):
         await message.answer(f"{e('cross_icon')} Ник не может быть пустым или длиннее 50 символов.\nПопробуй ещё раз.", parse_mode="HTML")
         return
     
-    user = message.from_user
-    user_id = user.id
-    username = user.username or "без ника"
-    full_name = user.full_name
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    username = data.get("username")
+    full_name = data.get("full_name")
+    
+    if not user_id:
+        user_id = message.from_user.id
+        username = message.from_user.username or "без ника"
+        full_name = message.from_user.full_name
 
     cursor.execute("INSERT OR REPLACE INTO users (user_id, username, full_name, game_nick, registered_at, subscribed) VALUES (?, ?, ?, ?, ?, 1)", 
                    (user_id, username, full_name, game_nick, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -223,24 +232,30 @@ async def process_nick(message: Message, state: FSMContext):
             pass
     await state.clear()
 
-async def start_change_nick(user_id: int, chat_id: int, state: FSMContext):
-    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (user_id,))
-    user = cursor.fetchone()
-    if not user:
-        await bot.send_message(chat_id, f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
-        return
-    await bot.send_message(chat_id, f"{e('sparkles')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
-    await state.set_state(Registration.waiting_for_new_nick)
-
-@dp.message(Command("change_nick"))
-async def change_nick_command(message: Message, state: FSMContext):
-    await start_change_nick(message.from_user.id, message.chat.id, state)
-
 @dp.callback_query(F.data == "change_nick")
 async def change_nick_button(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
-    await start_change_nick(callback.from_user.id, callback.message.chat.id, state)
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (callback.from_user.id,))
+    user = cursor.fetchone()
+    if not user:
+        await callback.message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
+        await callback.answer()
+        return
+    await state.update_data(user_id=callback.from_user.id)
+    await callback.message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_new_nick)
     await callback.answer()
+
+@dp.message(Command("change_nick"))
+async def change_nick_command(message: Message, state: FSMContext):
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (message.from_user.id,))
+    user = cursor.fetchone()
+    if not user:
+        await message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
+        return
+    await state.update_data(user_id=message.from_user.id)
+    await message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_new_nick)
 
 @dp.message(StateFilter(Registration.waiting_for_new_nick))
 async def process_new_nick(message: Message, state: FSMContext):
@@ -252,7 +267,12 @@ async def process_new_nick(message: Message, state: FSMContext):
         await message.answer(f"{e('cross_icon')} Ник не должен быть длиннее 50 символов.", parse_mode="HTML")
         return
     
-    user_id = message.from_user.id
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    
+    if not user_id:
+        user_id = message.from_user.id
+    
     cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
     if not cursor.fetchone():
         await message.answer(f"{e('cross_icon')} Пользователь не найден. Используй /register.", parse_mode="HTML")
@@ -264,6 +284,7 @@ async def process_new_nick(message: Message, state: FSMContext):
     
     cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (user_id,))
     saved = cursor.fetchone()
+    
     if not saved or saved[0] != new_nick:
         await message.answer(f"{e('cross_icon')} Не удалось сохранить ник.", parse_mode="HTML")
         return
