@@ -203,6 +203,8 @@ async def register_button(callback: CallbackQuery, state: FSMContext):
     await state.set_state(Registration.waiting_for_nick)
     await callback.answer()
 
+# ===== ОБРАБОТЧИКИ СОСТОЯНИЙ — СТОЯТ ПЕРВЫМИ! =====
+
 @dp.message(StateFilter(Registration.waiting_for_nick))
 async def process_nick(message: Message, state: FSMContext):
     game_nick = (message.text or "").strip()
@@ -231,31 +233,6 @@ async def process_nick(message: Message, state: FSMContext):
         except Exception:
             pass
     await state.clear()
-
-@dp.callback_query(F.data == "change_nick")
-async def change_nick_button(callback: CallbackQuery, state: FSMContext):
-    await callback.message.delete()
-    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (callback.from_user.id,))
-    user = cursor.fetchone()
-    if not user:
-        await callback.message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
-        await callback.answer()
-        return
-    await state.update_data(user_id=callback.from_user.id)
-    await callback.message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
-    await state.set_state(Registration.waiting_for_new_nick)
-    await callback.answer()
-
-@dp.message(Command("change_nick"))
-async def change_nick_command(message: Message, state: FSMContext):
-    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (message.from_user.id,))
-    user = cursor.fetchone()
-    if not user:
-        await message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
-        return
-    await state.update_data(user_id=message.from_user.id)
-    await message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
-    await state.set_state(Registration.waiting_for_new_nick)
 
 @dp.message(StateFilter(Registration.waiting_for_new_nick))
 async def process_new_nick(message: Message, state: FSMContext):
@@ -295,6 +272,33 @@ async def process_new_nick(message: Message, state: FSMContext):
         reply_markup=main_menu(is_registered=True)
     )
     await state.clear()
+
+@dp.callback_query(F.data == "change_nick")
+async def change_nick_button(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (callback.from_user.id,))
+    user = cursor.fetchone()
+    if not user:
+        await callback.message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
+        await callback.answer()
+        return
+    await state.update_data(user_id=callback.from_user.id)
+    await callback.message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_new_nick)
+    await callback.answer()
+
+@dp.message(Command("change_nick"))
+async def change_nick_command(message: Message, state: FSMContext):
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (message.from_user.id,))
+    user = cursor.fetchone()
+    if not user:
+        await message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
+        return
+    await state.update_data(user_id=message.from_user.id)
+    await message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_new_nick)
+
+# ===== ВСЕ ОСТАЛЬНЫЕ КОМАНДЫ =====
 
 @dp.message(Command("list"))
 async def admin_list_users(message: Message):
@@ -437,6 +441,8 @@ async def broadcast(message: Message):
         except Exception:
             pass
     await message.answer(f"{e('check_icon')} Отправлено: {count}", parse_mode="HTML")
+
+# ===== ОБЩИЙ ОБРАБОТЧИК — СТОИТ В САМОМ КОНЦЕ! =====
 
 @dp.message()
 async def all_messages(message: Message):
