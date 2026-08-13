@@ -43,7 +43,8 @@ PREMIUM_EMOJIS = {
     "support_header": "5289540825351473897",
     "always_near": "5407096682993170829",
     "check_icon": "5425109908976590072",
-    "cross_icon": "5425061375846147731"
+    "cross_icon": "5425061375846147731",
+    "edit_icon": "5424833446058935532"
 }
 
 bot = Bot(TOKEN)
@@ -73,13 +74,19 @@ conn.commit()
 
 class Registration(StatesGroup):
     waiting_for_nick = State()
+    waiting_for_new_nick = State()
 
 def e(key, fallback="✨"):
     return f'<tg-emoji emoji-id="{PREMIUM_EMOJIS[key]}">{fallback}</tg-emoji>'
 
-def main_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Зарегистрироваться", callback_data="register", icon_custom_emoji_id=PREMIUM_EMOJIS["register_icon"])],
+def main_menu(is_registered=False):
+    buttons = []
+    if not is_registered:
+        buttons.append([InlineKeyboardButton(text="Зарегистрироваться", callback_data="register", icon_custom_emoji_id=PREMIUM_EMOJIS["register_icon"])])
+    else:
+        buttons.append([InlineKeyboardButton(text="Изменить игровой ник", callback_data="change_nick", icon_custom_emoji_id=PREMIUM_EMOJIS["edit_icon"])])
+    
+    buttons.extend([
         [InlineKeyboardButton(text="Сообщить о пропуске актива / кубков", callback_data="report_active", icon_custom_emoji_id=PREMIUM_EMOJIS["report_icon"])],
         [InlineKeyboardButton(text="Сообщить о замене / опоздании на челлендж", callback_data="report_challenge", icon_custom_emoji_id=PREMIUM_EMOJIS["report_icon"])],
         [InlineKeyboardButton(text="Предложить идею", callback_data="idea", icon_custom_emoji_id=PREMIUM_EMOJIS["idea_icon"])],
@@ -87,6 +94,7 @@ def main_menu():
         [InlineKeyboardButton(text="Уведомления", callback_data="notifications", icon_custom_emoji_id=PREMIUM_EMOJIS["notifications_icon"])],
         [InlineKeyboardButton(text="Помощь", callback_data="help", icon_custom_emoji_id=PREMIUM_EMOJIS["help_icon"])]
     ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def notifications_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -140,6 +148,7 @@ def help_text():
         f"{e('heart')} <b>Команды бота</b> {e('dove')}\n\n"
         f"{e('sparkles')} /start — главное меню\n"
         f"{e('register_icon')} /register — регистрация\n"
+        f"{e('edit_icon')} /change_nick — сменить игровой ник\n"
         f"{e('report_icon')} /report_active — пропуск актива / кубков\n"
         f"{e('report_icon')} /report_challenge — замена / опоздание на челлендж\n"
         f"{e('idea_icon')} /idea — предложить идею\n"
@@ -150,8 +159,8 @@ def help_text():
         f"{e('help_icon')} /help — список команд"
     )
 
-async def send_menu(chat_id, text):
-    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=main_menu())
+async def send_menu(chat_id, text, is_registered=False):
+    await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=main_menu(is_registered))
 
 async def send_report(chat_id, text):
     await bot.send_message(chat_id, text, parse_mode="HTML")
@@ -162,15 +171,16 @@ async def start(message: Message, state: FSMContext):
     user = cursor.fetchone()
     if user:
         text = f"{e('greet_icon')} Привет, {html.escape(user[0])}! {e('sparkles')}\n\nТы в команде {e('angel_left')} <b>Freed Angels</b> {e('angel_right')}\nВыбери действие"
+        await send_menu(message.chat.id, text, is_registered=True)
     else:
         text = f"{e('greet_icon')} Добро пожаловать в {e('angel_left')} <b>Freed Angels</b> {e('angel_right')}! {e('star')}\n\nЯ — твой личный помощник {e('ribbon')}\nВыбери действие"
-    await send_menu(message.chat.id, text)
+        await send_menu(message.chat.id, text, is_registered=False)
 
 @dp.message(Command("register"))
 async def register_command(message: Message, state: FSMContext):
     cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (message.from_user.id,))
     if cursor.fetchone():
-        await send_menu(message.chat.id, f"{e('registered_already')} Регистрация уже пройдена! {e('sparkles')}")
+        await send_menu(message.chat.id, f"{e('registered_already')} Регистрация уже пройдена! {e('sparkles')}", is_registered=True)
         return
     await state.update_data(user_id=message.from_user.id, username=message.from_user.username or "без ника", full_name=message.from_user.full_name)
     await message.answer(f"{e('sparkles')} Напиши свой игровой ник из Аватарии\n\nПример: <i>Игрок</i>", parse_mode="HTML")
@@ -191,13 +201,72 @@ async def process_nick(message: Message, state: FSMContext):
     data = await state.get_data()
     cursor.execute("INSERT OR REPLACE INTO users (user_id, username, full_name, game_nick, registered_at, subscribed) VALUES (?, ?, ?, ?, ?, 1)", (data["user_id"], data["username"], data["full_name"], game_nick, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
-    await send_menu(message.chat.id, f"{e('check_icon')} Поздравляем, <b>{html.escape(game_nick)}</b>!\n\nТеперь ты в составе {e('angel_left')} <b>Freed Angels</b> {e('angel_right')}\n\nВсе функции доступны!")
+    await send_menu(message.chat.id, f"{e('check_icon')} Поздравляем, <b>{html.escape(game_nick)}</b>!\n\nТеперь ты в составе {e('angel_left')} <b>Freed Angels</b> {e('angel_right')}\n\nВсе функции доступны!", is_registered=True)
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, f"{e('star')} <b>Новый участник в клубе!</b>\n\nИгровой ник: {html.escape(game_nick)}\nTelegram: @{html.escape(data['username'])}\nID: <code>{data['user_id']}</code>", parse_mode="HTML")
         except Exception:
             pass
     await state.clear()
+
+@dp.message(Command("change_nick"))
+@dp.callback_query(F.data == "change_nick")
+async def change_nick_start(event, state: FSMContext):
+    if isinstance(event, CallbackQuery):
+        await event.message.delete()
+        message = event.message
+        user_id = event.from_user.id
+    else:
+        message = event
+        user_id = message.from_user.id
+    
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (user_id,))
+    if not cursor.fetchone():
+        await message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться!", parse_mode="HTML")
+        return
+
+    await message.answer(f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
+    await state.set_state(Registration.waiting_for_new_nick)
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+
+@dp.message(StateFilter(Registration.waiting_for_new_nick))
+async def process_new_nick(message: Message, state: FSMContext):
+    new_nick = (message.text or "").strip()
+    if not new_nick or len(new_nick) > 50:
+        await message.answer(f"{e('cross_icon')} Ник не может быть пустым или длиннее 50 символов.\nПопробуй ещё раз.", parse_mode="HTML")
+        return
+    
+    cursor.execute("UPDATE users SET game_nick = ? WHERE user_id = ?", (new_nick, message.from_user.id))
+    conn.commit()
+    
+    await send_menu(message.chat.id, f"{e('check_icon')} Ник успешно изменён на <b>{html.escape(new_nick)}</b>!", is_registered=True)
+    await state.clear()
+
+@dp.message(Command("list"))
+async def admin_list_users(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    
+    cursor.execute("SELECT game_nick, username, user_id FROM users")
+    users = cursor.fetchall()
+    
+    if not users:
+        await message.answer(f"{e('cross_icon')} В базе пока нет участников.", parse_mode="HTML")
+        return
+    
+    response = f"{e('star')} <b>Список участников клуба:</b>\n\n"
+    for i, u in enumerate(users, 1):
+        nick, tg, uid = u
+        response += f"{i}. <b>{html.escape(nick)}</b> — @{html.escape(tg or 'нет')} (<code>{uid}</code>)\n"
+    
+    response += f"\n{e('dove')} Всего: {len(users)}"
+    
+    if len(response) > 4000:
+        for x in range(0, len(response), 4000):
+            await message.answer(response[x:x+4000], parse_mode="HTML")
+    else:
+        await message.answer(response, parse_mode="HTML")
 
 @dp.callback_query(F.data == "report_active")
 async def report_active_button(callback: CallbackQuery):
@@ -253,42 +322,49 @@ async def notifications_command(message: Message):
 async def subscribe_button(callback: CallbackQuery):
     cursor.execute("UPDATE users SET subscribed = 1 WHERE user_id = ?", (callback.from_user.id,))
     conn.commit()
-    await send_menu(callback.message.chat.id, f"{e('check_icon')} Подписка включена! {e('sparkles')}")
+    await send_menu(callback.message.chat.id, f"{e('check_icon')} Подписка включена! {e('sparkles')}", is_registered=True)
     await callback.answer()
 
 @dp.message(Command("subscribe"))
 async def subscribe_command(message: Message):
     cursor.execute("UPDATE users SET subscribed = 1 WHERE user_id = ?", (message.from_user.id,))
     conn.commit()
-    await send_menu(message.chat.id, f"{e('check_icon')} Подписка включена! {e('sparkles')}")
+    await send_menu(message.chat.id, f"{e('check_icon')} Подписка включена! {e('sparkles')}", is_registered=True)
 
 @dp.callback_query(F.data == "unsubscribe")
 async def unsubscribe_button(callback: CallbackQuery):
     cursor.execute("UPDATE users SET subscribed = 0 WHERE user_id = ?", (callback.from_user.id,))
     conn.commit()
-    await send_menu(callback.message.chat.id, f"{e('cross_icon')} Уведомления отключены.")
+    await send_menu(callback.message.chat.id, f"{e('cross_icon')} Уведомления отключены.", is_registered=True)
     await callback.answer()
 
 @dp.message(Command("unsubscribe"))
 async def unsubscribe_command(message: Message):
     cursor.execute("UPDATE users SET subscribed = 0 WHERE user_id = ?", (message.from_user.id,))
     conn.commit()
-    await send_menu(message.chat.id, f"{e('cross_icon')} Уведомления отключены.")
+    await send_menu(message.chat.id, f"{e('cross_icon')} Уведомления отключены.", is_registered=True)
 
 @dp.callback_query(F.data == "help")
 async def help_button(callback: CallbackQuery):
     await callback.message.delete()
-    await send_menu(callback.message.chat.id, help_text())
+    cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (callback.from_user.id,))
+    await send_menu(callback.message.chat.id, help_text(), is_registered=cursor.fetchone() is not None)
     await callback.answer()
 
 @dp.message(Command("help"))
 async def help_command(message: Message):
-    await send_menu(message.chat.id, help_text())
+    cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (message.from_user.id,))
+    await send_menu(message.chat.id, help_text(), is_registered=cursor.fetchone() is not None)
 
 @dp.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: CallbackQuery):
     await callback.message.delete()
-    await start(callback.message, FSMContext(storage=dp.storage, key=None))
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (callback.from_user.id,))
+    user = cursor.fetchone()
+    if user:
+        await send_menu(callback.message.chat.id, f"{e('dove')} <b>Главное меню</b>", is_registered=True)
+    else:
+        await send_menu(callback.message.chat.id, f"{e('dove')} <b>Главное меню</b>", is_registered=False)
     await callback.answer()
 
 @dp.message(Command("broadcast"))
@@ -324,7 +400,7 @@ async def all_messages(message: Message):
         sent = await bot.send_message(CHAT_ADMINS, card, parse_mode="HTML")
         cursor.execute("INSERT INTO messages (user_id, msg_in_admins) VALUES (?, ?)", (user.id, str(sent.message_id)))
         conn.commit()
-        await message.reply(f"{e('check_icon')} Сообщение передано администрации.\n\nХочешь сделать что-то ещё?", reply_markup=main_menu(), parse_mode="HTML")
+        await message.reply(f"{e('check_icon')} Сообщение передано администрации.\n\nХочешь сделать что-то ещё?", reply_markup=main_menu(result is not None), parse_mode="HTML")
     elif message.chat.id == CHAT_ADMINS and message.reply_to_message and message.reply_to_message.from_user.id == bot.id:
         cursor.execute("SELECT user_id FROM messages WHERE msg_in_admins = ? ORDER BY id DESC LIMIT 1", (str(message.reply_to_message.message_id),))
         result = cursor.fetchone()
@@ -348,9 +424,10 @@ async def start_web_server():
     app.router.add_get('/health', health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print("Веб-сервер запущен на порту 10000")
+    print(f"Веб-сервер запущен на порту {port}")
 
 async def main():
     print("🕊 Бот клуба Freed Angels успешно запущен!")
