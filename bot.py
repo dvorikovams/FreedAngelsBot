@@ -231,8 +231,7 @@ async def process_nick(message: Message, state: FSMContext):
         except Exception:
             pass
     await state.clear()
-
-# ===== СМЕНА НИКА =====
+    return
 
 @dp.callback_query(F.data == "change_nick")
 async def change_nick_button(callback: CallbackQuery, state: FSMContext):
@@ -298,8 +297,7 @@ async def process_new_nick(message: Message, state: FSMContext):
         reply_markup=main_menu(is_registered=True)
     )
     await state.clear()
-
-# ===== КОМАНДЫ =====
+    return
 
 @dp.message(Command("list"))
 async def admin_list_users(message: Message):
