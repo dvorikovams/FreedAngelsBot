@@ -17,6 +17,32 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ADMINS = -1004396371396
 ADMIN_IDS = [7912018121, 807512049, 1709727241, 922576013, 5966724057, 755639362, 895799049]
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE_PATH = os.path.join(BASE_DIR, "club_bot.db")
+
+conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    full_name TEXT,
+    game_nick TEXT,
+    registered_at TEXT,
+    subscribed INTEGER DEFAULT 1
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    msg_in_admins TEXT
+)
+""")
+conn.commit()
+
 PREMIUM_EMOJIS = {
     "angel_left": "5314416167828356312",
     "angel_right": "5314267347211551147",
@@ -49,28 +75,6 @@ PREMIUM_EMOJIS = {
 
 bot = Bot(TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-conn = sqlite3.connect("club_bot.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    full_name TEXT,
-    game_nick TEXT,
-    registered_at TEXT,
-    subscribed INTEGER DEFAULT 1
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    msg_in_admins TEXT
-)
-""")
-conn.commit()
 
 class Registration(StatesGroup):
     waiting_for_nick = State()
@@ -203,9 +207,9 @@ async def process_nick(message: Message, state: FSMContext):
         return
     
     user = message.from_user
+    user_id = user.id
     username = user.username or "без ника"
     full_name = user.full_name
-    user_id = user.id
 
     cursor.execute("INSERT OR REPLACE INTO users (user_id, username, full_name, game_nick, registered_at, subscribed) VALUES (?, ?, ?, ?, ?, 1)", 
                    (user_id, username, full_name, game_nick, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -219,69 +223,79 @@ async def process_nick(message: Message, state: FSMContext):
             pass
     await state.clear()
 
-@dp.message(Command("change_nick"))
-@dp.callback_query(F.data == "change_nick")
-async def change_nick_start(event, state: FSMContext):
-    if isinstance(event, CallbackQuery):
-        await event.message.delete()
-        chat_id = event.message.chat.id
-        user_id = event.from_user.id
-        await event.answer()
-    else:
-        chat_id = event.chat.id
-        user_id = event.from_user.id
-    
+async def start_change_nick(user_id: int, chat_id: int, state: FSMContext):
     cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (user_id,))
-    if not cursor.fetchone():
-        await bot.send_message(chat_id, f"{e('cross_icon')} Сначала нужно зарегистрироваться!", parse_mode="HTML")
+    user = cursor.fetchone()
+    if not user:
+        await bot.send_message(chat_id, f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
         return
-
-    await bot.send_message(chat_id, f"{e('edit_icon')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
+    await bot.send_message(chat_id, f"{e('sparkles')} Напиши свой новый игровой ник из Аватарии:", parse_mode="HTML")
     await state.set_state(Registration.waiting_for_new_nick)
+
+@dp.message(Command("change_nick"))
+async def change_nick_command(message: Message, state: FSMContext):
+    await start_change_nick(message.from_user.id, message.chat.id, state)
+
+@dp.callback_query(F.data == "change_nick")
+async def change_nick_button(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await start_change_nick(callback.from_user.id, callback.message.chat.id, state)
+    await callback.answer()
 
 @dp.message(StateFilter(Registration.waiting_for_new_nick))
 async def process_new_nick(message: Message, state: FSMContext):
     new_nick = (message.text or "").strip()
-    if not new_nick or len(new_nick) > 50:
-        await message.answer(f"{e('cross_icon')} Ник не может быть пустым или длиннее 50 символов.\nПопробуй ещё раз.", parse_mode="HTML")
+    if not new_nick:
+        await message.answer(f"{e('cross_icon')} Ник не может быть пустым.", parse_mode="HTML")
+        return
+    if len(new_nick) > 50:
+        await message.answer(f"{e('cross_icon')} Ник не должен быть длиннее 50 символов.", parse_mode="HTML")
         return
     
-    cursor.execute("UPDATE users SET game_nick = ? WHERE user_id = ?", (new_nick, message.from_user.id))
+    user_id = message.from_user.id
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+    if not cursor.fetchone():
+        await message.answer(f"{e('cross_icon')} Пользователь не найден. Используй /register.", parse_mode="HTML")
+        await state.clear()
+        return
+    
+    cursor.execute("UPDATE users SET game_nick = ? WHERE user_id = ?", (new_nick, user_id))
     conn.commit()
     
-    await send_menu(message.chat.id, f"{e('check_icon')} Ник успешно изменён на <b>{html.escape(new_nick)}</b>!", is_registered=True)
+    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (user_id,))
+    saved = cursor.fetchone()
+    if not saved or saved[0] != new_nick:
+        await message.answer(f"{e('cross_icon')} Не удалось сохранить ник.", parse_mode="HTML")
+        return
+    
+    await message.answer(
+        f"{e('check_icon')} Ник успешно изменён на <b>{html.escape(new_nick)}</b>!",
+        parse_mode="HTML",
+        reply_markup=main_menu(is_registered=True)
+    )
     await state.clear()
 
 @dp.message(Command("list"))
 async def admin_list_users(message: Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer(f"{e('cross_icon')} Доступ запрещён. Ваш ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
+        await message.answer(f"{e('cross_icon')} Доступ запрещён.\nВаш ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
         return
-    
     try:
-        cursor.execute("SELECT game_nick, username, user_id FROM users")
+        cursor.execute("SELECT user_id, username, full_name, game_nick, registered_at FROM users ORDER BY registered_at ASC")
         users = cursor.fetchall()
-        
         if not users:
-            await message.answer(f"{e('cross_icon')} В базе пока нет участников.", parse_mode="HTML")
+            await message.answer(f"{e('cross_icon')} В базе пока нет участников.\n\nПуть к базе:\n<code>{html.escape(DATABASE_PATH)}</code>", parse_mode="HTML")
             return
-        
-        response = f"{e('star')} <b>Список участников клуба:</b>\n\n"
-        for i, u in enumerate(users, 1):
-            nick, tg, uid = u
-            safe_nick = html.escape(str(nick)) if nick else "без ника"
-            safe_tg = html.escape(str(tg)) if tg else "нет"
-            response += f"{i}. <b>{safe_nick}</b> — @{safe_tg} (<code>{uid}</code>)\n"
-        
-        response += f"\n{e('dove')} Всего: {len(users)}"
-        
-        if len(response) > 4000:
-            for x in range(0, len(response), 4000):
-                await message.answer(response[x:x+4000], parse_mode="HTML")
-        else:
-            await message.answer(response, parse_mode="HTML")
+        parts = [f"{e('star')} <b>Зарегистрированные участники</b>\n"]
+        for i, row in enumerate(users, 1):
+            user_id, username, full_name, game_nick, registered_at = row
+            parts.append(f"\n<b>{i}. {html.escape(game_nick or 'не указан')}</b>\nИмя: {html.escape(full_name or 'без имени')}\nTelegram: @{html.escape(username or 'нет')}\nID: <code>{user_id}</code>\nДата: {registered_at or 'не указана'}\n")
+        parts.append(f"\n{e('dove')} Всего: <b>{len(users)}</b>")
+        result = "".join(parts)
+        for start in range(0, len(result), 3900):
+            await message.answer(result[start:start+3900], parse_mode="HTML")
     except Exception as ex:
-        await message.answer(f"{e('cross_icon')} Ошибка вывода списка: {html.escape(str(ex))}", parse_mode="HTML")
+        await message.answer(f"{e('cross_icon')} Ошибка: {html.escape(str(ex))}", parse_mode="HTML")
 
 @dp.callback_query(F.data == "report_active")
 async def report_active_button(callback: CallbackQuery):
@@ -442,7 +456,7 @@ async def start_web_server():
     port = int(os.getenv("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"Веб-сервер запущен на порту {port}")
+    print(f"🌐 Веб-сервер запущен на порту {port}")
 
 async def main():
     print("🕊 Бот клуба Freed Angels успешно запущен!")
