@@ -232,6 +232,8 @@ async def process_nick(message: Message, state: FSMContext):
             pass
     await state.clear()
 
+# ===== СМЕНА НИКА =====
+
 @dp.callback_query(F.data == "change_nick")
 async def change_nick_button(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
@@ -241,6 +243,7 @@ async def change_nick_button(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
         await callback.answer()
         return
+    
     await state.update_data(user_id=callback.from_user.id)
     await callback.message.answer(
         f"{e('edit_icon')} Введите новый игровой ник {e('sparkles')}\n\nПример: <i>НовыйНик</i>",
@@ -256,6 +259,7 @@ async def change_nick_command(message: Message, state: FSMContext):
     if not user:
         await message.answer(f"{e('cross_icon')} Сначала нужно зарегистрироваться.", parse_mode="HTML")
         return
+    
     await state.update_data(user_id=message.from_user.id)
     await message.answer(
         f"{e('edit_icon')} Введите новый игровой ник {e('sparkles')}\n\nПример: <i>НовыйНик</i>",
@@ -288,19 +292,14 @@ async def process_new_nick(message: Message, state: FSMContext):
     cursor.execute("UPDATE users SET game_nick = ? WHERE user_id = ?", (new_nick, user_id))
     conn.commit()
     
-    cursor.execute("SELECT game_nick FROM users WHERE user_id = ?", (user_id,))
-    saved = cursor.fetchone()
-    
-    if not saved or saved[0] != new_nick:
-        await message.answer(f"{e('cross_icon')} Не удалось сохранить ник.", parse_mode="HTML")
-        return
-    
     await message.answer(
         f"{e('check_icon')} Ник успешно изменён на <b>{html.escape(new_nick)}</b>! {e('sparkles')}",
         parse_mode="HTML",
         reply_markup=main_menu(is_registered=True)
     )
     await state.clear()
+
+# ===== КОМАНДЫ =====
 
 @dp.message(Command("list"))
 async def admin_list_users(message: Message):
