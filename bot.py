@@ -199,7 +199,7 @@ async def register_button(callback: CallbackQuery, state: FSMContext):
     await start_registration(callback.from_user, callback.message.chat.id, state)
     await callback.answer()
 
-@dp.message(StateFilter(Registration.waiting_for_nick))
+@dp.message(Registration.waiting_for_nick)
 async def process_nick(message: Message, state: FSMContext):
     game_nick = (message.text or "").strip()
     if not game_nick or len(game_nick) > 50:
@@ -228,13 +228,12 @@ async def process_nick(message: Message, state: FSMContext):
     await state.clear()
 
 async def start_change_nick(user, chat_id, state: FSMContext):
-    await state.update_data(user_id=user.id, username=user.username or "без ника", full_name=user.full_name)
+    await state.set_state(Registration.waiting_for_new_nick)
     await bot.send_message(
         chat_id,
         f"{e('edit_icon')} {e('sparkles')} <b>Введите новый игровой ник:</b>",
         parse_mode="HTML"
     )
-    await state.set_state(Registration.waiting_for_new_nick)
 
 @dp.message(Command("change_nick"))
 async def change_nick_command(message: Message, state: FSMContext):
@@ -246,7 +245,7 @@ async def change_nick_button(callback: CallbackQuery, state: FSMContext):
     await start_change_nick(callback.from_user, callback.message.chat.id, state)
     await callback.answer()
 
-@dp.message(StateFilter(Registration.waiting_for_new_nick))
+@dp.message(Registration.waiting_for_new_nick)
 async def process_new_nick(message: Message, state: FSMContext):
     new_nick = (message.text or "").strip()
     if not new_nick or len(new_nick) > 50:
@@ -429,7 +428,7 @@ async def broadcast(message: Message):
             pass
     await message.answer(f"{e('check_icon')} Отправлено: {count}", parse_mode="HTML")
 
-@dp.message()
+@dp.message(StateFilter(None))
 async def all_messages(message: Message):
     if message.chat.type == "private":
         user = message.from_user
